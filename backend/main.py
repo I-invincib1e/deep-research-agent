@@ -2,8 +2,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from research_agent import ResearchAgent
+from exceptions import ResearchError, ConfigurationError, AnalysisError
 import uvicorn
-import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("API")
 
 app = FastAPI(title="Deep Research Agent API")
 
@@ -21,6 +26,7 @@ class ResearchRequest(BaseModel):
     api_key: str = None
     model: str = None
     base_url: str = None
+    max_content_chars: int = None
 
 @app.post("/api/research")
 async def start_research(request: ResearchRequest):
@@ -32,14 +38,24 @@ async def start_research(request: ResearchRequest):
             provider=request.provider,
             api_key=request.api_key,
             model=request.model,
-            base_url=request.base_url
+            base_url=request.base_url,
+            max_content_chars=request.max_content_chars
         )
         
-        # Now awaiting the async method
         result = await agent.conduct_research(request.topic)
         return result
-    except Exception as e:
+    except ConfigurationError as e:
+        logger.warning(f"Configuration error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except AnalysisError as e:
+        logger.error(f"Analysis error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+    except ResearchError as e:
+        logger.error(f"Research error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
 @app.get("/health")
 async def health_check():
