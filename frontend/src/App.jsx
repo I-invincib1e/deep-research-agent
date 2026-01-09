@@ -52,10 +52,10 @@ const App = () => {
       // Add agent response
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: data.report,
+        content: data.answer, // Map 'answer' to content
         topic: data.topic,
-        results: data.search_results,
-        followup_questions: data.followup_questions
+        results: data.sources, // Map 'sources' to results for ChatInterface
+        followup_questions: data.follow_up_questions // Note: snake_case in backend
       }]);
     } catch (err) {
       setError(err.message);

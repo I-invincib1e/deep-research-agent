@@ -115,20 +115,23 @@ const ChatInterface = ({ onSearch, isLoading, error, messages, onDownloadPDF }) 
             {/* Sources Preview */}
              {!isUser && message.results && message.results.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-2 max-w-2xl">
-                    {message.results.slice(0, 3).map((source, i) => (
+                    {message.results.slice(0, 5).map((source, i) => (
                         <a 
                             key={i} 
-                            href={source.href}
+                            href={source.url} // Changed from href to url
                             target="_blank"
                             rel="noreferrer" 
-                            className="text-xs text-subtext hover:text-primary flex items-center gap-1 bg-black/20 px-2 py-1 rounded truncate max-w-[150px]"
+                            className="text-xs text-subtext hover:text-primary flex items-center gap-1 bg-black/20 px-2 py-1 rounded truncate max-w-[200px] border border-white/5 hover:border-primary/20 transition-colors"
                         >
+                            <span className="text-[10px] font-bold bg-primary/20 text-primary px-1 rounded-sm min-w-[16px] text-center">
+                              {source.id}
+                            </span>
                             <img 
-                                src={`https://www.google.com/s2/favicons?domain=${new URL(source.href).hostname}`} 
+                                src={`https://www.google.com/s2/favicons?domain=${source.domain}`} 
                                 alt="" 
                                 className="w-3 h-3 opacity-50"
                             />
-                            <span className="truncate">{new URL(source.href).hostname}</span>
+                            <span className="truncate">{source.title}</span>
                         </a>
                     ))}
                 </div>
