@@ -28,7 +28,6 @@ async def start_research(request: ResearchRequest):
         if not request.topic:
             raise HTTPException(status_code=400, detail="Topic is required")
         
-        # Initialize agent per request to handle dynamic keys/configs
         agent = ResearchAgent(
             provider=request.provider,
             api_key=request.api_key,
@@ -36,7 +35,8 @@ async def start_research(request: ResearchRequest):
             base_url=request.base_url
         )
         
-        result = agent.conduct_research(request.topic)
+        # Now awaiting the async method
+        result = await agent.conduct_research(request.topic)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

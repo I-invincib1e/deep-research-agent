@@ -9,3 +9,4 @@ trafilatura
 pydantic
 openai
 anthropic
+aiohttp

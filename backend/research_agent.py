@@ -1,5 +1,6 @@
 import os
-import requests
+import asyncio
+import aiohttp
 import trafilatura
 from duckduckgo_search import DDGS
 from groq import Groq
@@ -17,6 +18,9 @@ class ResearchAgent:
         self.base_url = base_url
         self.model = model
         self.client = self._initialize_client()
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        }
 
     def _initialize_client(self):
         """Initializes the appropriate LLM client based on provider."""
@@ -43,7 +47,6 @@ class ResearchAgent:
                 if not self.base_url:
                     raise ValueError("Base URL is required for Custom provider.")
                 self.model = self.model or "local-model"
-                # Custom usually follows OpenAI format
                 return OpenAI(api_key=self.api_key or "dummy", base_url=self.base_url)
             
             else:
@@ -52,35 +55,50 @@ class ResearchAgent:
             print(f"Error initializing client: {e}")
             raise
 
-    def search(self, query: str, max_results: int = 5):
-        """Searches the web for the query."""
+    async def search(self, query: str, max_results: int = 5):
+        """Searches the web for the query securely."""
         print(f"Searching for: {query}")
+        try:
+            # Run blocking DDGS in a separate thread to prevent freezing
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._search_sync, query, max_results)
+        except Exception as e:
+            print(f"Search failed: {e}")
+            return []
+
+    def _search_sync(self, query: str, max_results: int):
+        """Synchronous helper for DDGS"""
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-        return results
+            return list(ddgs.text(query, max_results=max_results))
 
-    def scrape(self, urls: list[str]):
-        """Scrapes content from the provided URLs."""
-        docs = []
-        for url in urls:
-            print(f"Scraping: {url}")
-            try:
-                downloaded = trafilatura.fetch_url(url)
-                if downloaded:
-                    text = trafilatura.extract(downloaded)
-                    if text:
-                        docs.append({"url": url, "content": text})
-                else:
-                    resp = requests.get(url, timeout=10)
-                    if resp.status_code == 200:
-                        soup = BeautifulSoup(resp.content, 'html.parser')
+    async def scrape_url(self, session, url):
+        """Scrapes a single URL asynchronously with stealth headers."""
+        print(f"Scraping: {url}")
+        try:
+            async with session.get(url, headers=self.headers, timeout=10) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    # Use trafilatura on the HTML content
+                    text = trafilatura.extract(html)
+                    if not text:
+                        # Fallback to simple soup if trafilatura fails to extract
+                        soup = BeautifulSoup(html, 'html.parser')
                         text = soup.get_text(separator='\n', strip=True)
-                        docs.append({"url": url, "content": text[:10000]})
-            except Exception as e:
-                print(f"Failed to scrape {url}: {e}")
-        return docs
+                    
+                    # Safety Truncation: Limit to ~12k characters per source
+                    return {"url": url, "content": text[:12000] if text else ""}
+        except Exception as e:
+            print(f"Failed to scrape {url}: {e}")
+        return None
 
-    def analyze(self, topic: str, search_results: list, scraped_content: list):
+    async def scrape(self, urls: list[str]):
+        """Concurrent scraping of multiple URLs."""
+        async with aiohttp.ClientSession() as session:
+            tasks = [self.scrape_url(session, url) for url in urls]
+            results = await asyncio.gather(*tasks)
+            return [r for r in results if r]
+
+    async def analyze(self, topic: str, search_results: list, scraped_content: list):
         """Analyzes the gathered information to generate a report."""
         print(f"Analyzing data for topic: {topic} using {self.provider}")
         
@@ -103,38 +121,43 @@ class ResearchAgent:
         )
 
         try:
+            # Offload blocking LLM calls to thread
+            loop = asyncio.get_event_loop()
             if self.provider == "anthropic":
-                message = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=2048,
-                    temperature=0.7,
-                    system=system_prompt,
-                    messages=[
-                        {"role": "user", "content": user_prompt}
-                    ]
+                response = await loop.run_in_executor(
+                    None, 
+                    lambda: self.client.messages.create(
+                        model=self.model,
+                        max_tokens=2048,
+                        temperature=0.7,
+                        system=system_prompt,
+                        messages=[{"role": "user", "content": user_prompt}]
+                    )
                 )
-                return message.content[0].text
+                return response.content[0].text
             else:
-                # OpenAI / Groq / Custom share similar API
-                chat_completion = self.client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    model=self.model,
-                    temperature=0.7,
-                    max_tokens=2048
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        model=self.model,
+                        temperature=0.7,
+                        max_tokens=2048
+                    )
                 )
-                return chat_completion.choices[0].message.content
+                return response.choices[0].message.content
         except Exception as e:
             return f"Error during analysis: {str(e)}"
 
-    def conduct_research(self, topic: str):
-        """Runs the full research pipeline."""
-        search_results = self.search(topic)
+    async def conduct_research(self, topic: str):
+        """Runs the full research pipeline asynchronously."""
+        search_results = await self.search(topic)
         urls = [r['href'] for r in search_results]
-        scraped_data = self.scrape(urls)
-        report = self.analyze(topic, search_results, scraped_data)
+        scraped_data = await self.scrape(urls)
+        report = await self.analyze(topic, search_results, scraped_data)
         return {
             "topic": topic,
             "search_results": search_results,
