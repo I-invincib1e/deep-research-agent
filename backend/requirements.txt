@@ -10,3 +10,5 @@ pydantic
 openai
 anthropic
 aiohttp
+markdown
+weasyprint

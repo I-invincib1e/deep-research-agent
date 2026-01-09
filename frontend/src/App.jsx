@@ -109,7 +109,10 @@ const App = () => {
           )}
         </AnimatePresence>
 
-        <ReportView data={result} />
+        <ReportView 
+          data={result} 
+          onFollowupClick={(question) => handleSearch(question)}
+        />
       </main>
 
       <SettingsModal 
