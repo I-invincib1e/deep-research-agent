@@ -1,0 +1,60 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  background-color: #0e0f14;
+  color: #e8e8ea;
+}
+
+body {
+  @apply bg-background text-text font-sans antialiased;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-surface;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-subtext/30 rounded-full hover:bg-subtext/50 transition-colors;
+}
+
+/* Markdown Styles */
+.prose h1 {
+  @apply text-3xl font-bold mb-6 text-primary;
+}
+.prose h2 {
+  @apply text-2xl font-semibold mb-4 text-white mt-8;
+}
+.prose h3 {
+  @apply text-xl font-medium mb-3 text-accent mt-6;
+}
+.prose p {
+  @apply mb-4 leading-relaxed text-subtext/90;
+}
+.prose ul {
+  @apply list-disc list-outside mb-4 pl-6;
+}
+.prose li {
+  @apply mb-2;
+}
+.prose strong {
+  @apply text-white font-semibold;
+}
+.prose a {
+  @apply text-accent hover:text-primary underline transition-colors;
+}
+.prose blockquote {
+  @apply border-l-4 border-primary/50 pl-4 py-1 my-4 bg-surface/50 rounded-r italic;
+}
+.prose code {
+  @apply bg-surface px-1.5 py-0.5 rounded text-accent text-sm font-mono;
+}
+.prose pre {
+  @apply bg-surface p-4 rounded-lg overflow-x-auto mb-6 border border-white/5;
+}
