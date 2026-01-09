@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 class ResearchRequest(BaseModel):
-    topic: str
+    messages: list[dict]  # List of {role: str, content: str}
     provider: str = "groq"
     api_key: str = None
     model: str = None
@@ -38,8 +38,8 @@ class PDFExportRequest(BaseModel):
 @app.post("/api/research")
 async def start_research(request: ResearchRequest):
     try:
-        if not request.topic:
-            raise HTTPException(status_code=400, detail="Topic is required")
+        if not request.messages:
+            raise HTTPException(status_code=400, detail="Messages are required")
         
         agent = ResearchAgent(
             provider=request.provider,
@@ -50,7 +50,7 @@ async def start_research(request: ResearchRequest):
             use_cache=request.use_cache
         )
         
-        result = await agent.conduct_research(request.topic)
+        result = await agent.conduct_research(request.messages)
         return result
     except ConfigurationError as e:
         logger.warning(f"Configuration error: {e}")

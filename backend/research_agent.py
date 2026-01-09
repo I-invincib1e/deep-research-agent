@@ -189,9 +189,53 @@ class ResearchAgent:
             logger.info(f"✅ Successfully scraped {len(successful)}/{len(urls)} URLs")
             return successful
 
-    async def analyze(self, topic: str, search_results: list, scraped_content: list):
+    async def generate_search_query(self, messages: list) -> str:
+        """Generate a specific search query based on conversation history."""
+        # If only one message, use it directly
+        if len(messages) == 1:
+            return messages[0]['content']
+
+        # Otherwise, refine query using context
+        prompt = f"""Given the following conversation history, create a specific, optimal web search query to answer the last user message.
+        
+History:
+{str(messages[-3:])}
+
+Return ONLY the search query, nothing else. Do not quote it."""
+        
+        try:
+            loop = asyncio.get_event_loop()
+            if self.provider == "anthropic":
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.messages.create(
+                        model=self.model,
+                        max_tokens=100,
+                        temperature=0.7,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                )
+                query = response.content[0].text.strip()
+            else:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.chat.completions.create(
+                        messages=[{"role": "user", "content": prompt}],
+                        model=self.model,
+                        temperature=0.7,
+                        max_tokens=100
+                    )
+                )
+                query = response.choices[0].message.content.strip()
+            
+            logger.info(f"🔍 Refined Query: '{query}'")
+            return query
+        except Exception:
+            return messages[-1]['content']
+
+    async def analyze(self, query: str, search_results: list, scraped_content: list, messages: list = None):
         """Analyzes content with token management and proper error handling."""
-        logger.info(f"🧠 Analyzing data for topic: {topic} using {self.provider}")
+        logger.info(f"🧠 Analyzing data for query: {query} using {self.provider}")
         
         context = ""
         total_tokens = 0
@@ -212,17 +256,26 @@ class ResearchAgent:
         logger.info(f"📊 Context: ~{total_tokens} tokens from {sources_used} sources")
         
         system_prompt = (
-            "You are a 'Deep Research Agent'. Your goal is to produce a professional, structured intelligence report "
-            "based on the provided web search results and scraped content. "
-            "Focus on depth, clarity, and actionable insights. "
-            "Format the output in clean Markdown."
+            "You are Aura, an advanced research companion. Your goal is to conduct deep research and provide "
+            "comprehensive, structured, and engaging answers. "
+            "Do not just summarize data; explain it. If the topic is complex, break it down. "
+            "Use a professional but conversational tone. "
+            "Always include citations to the provided sources in [Source](url) format."
         )
         
+        # Format history for the model
+        convo_history = ""
+        if messages:
+            for msg in messages[:-1]: # Exclude last message as it's the trigger
+                convo_history += f"{msg['role'].upper()}: {msg['content']}\n"
+
         user_prompt = (
-            f"Topic: {topic}\n\n"
+            f"Conversation History:\n{convo_history}\n\n"
+            f"Current Query: {query}\n\n"
             f"Search Results Summary:\n{search_results}\n\n"
             f"Scraped Content:\n{context}\n\n"
-            "Please generate a comprehensive intelligence report on the topic."
+            "Please provide a comprehensive answer based on the research above. "
+            "Address the user's latest query mainly, but use history for context."
         )
 
         try:
@@ -260,95 +313,45 @@ class ResearchAgent:
             logger.error(f"❌ Analysis failed: {error_msg}")
             raise AnalysisError(f"LLM analysis failed: {error_msg}")
 
-    async def generate_followup_questions(self, report: str, topic: str) -> list[str]:
-        """Generate follow-up research questions based on the report."""
-        logger.info(f"🔮 Generating follow-up questions for: {topic}")
-        
-        prompt = f"""Based on this research report about "{topic}", suggest 3-5 specific follow-up research questions that would help deepen understanding of the topic. 
-
-Report:
-{report[:4000]}
-
-Return ONLY the questions as a numbered list, nothing else. Each question should be specific and researchable."""
-
-        try:
-            loop = asyncio.get_event_loop()
-            if self.provider == "anthropic":
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self.client.messages.create(
-                        model=self.model,
-                        max_tokens=500,
-                        temperature=0.7,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                )
-                text = response.content[0].text
-            else:
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self.client.chat.completions.create(
-                        messages=[{"role": "user", "content": prompt}],
-                        model=self.model,
-                        temperature=0.7,
-                        max_tokens=500
-                    )
-                )
-                text = response.choices[0].message.content
-            
-            # Parse numbered list
-            questions = []
-            for line in text.strip().split('\n'):
-                line = line.strip()
-                if line and line[0].isdigit():
-                    # Remove number prefix like "1. " or "1) "
-                    question = line.lstrip('0123456789.)')
-                    question = question.strip()
-                    if question:
-                        questions.append(question)
-            
-            logger.info(f"✅ Generated {len(questions)} follow-up questions")
-            return questions[:5]  # Max 5 questions
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to generate follow-up questions: {e}")
-            return []
-
-    async def conduct_research(self, topic: str):
+    async def conduct_research(self, messages: list):
         """Runs the full research pipeline with multi-turn support."""
-        logger.info(f"🚀 Starting research on: {topic}")
+        if not messages:
+            raise ResearchError("No messages provided")
+            
+        # 1. Generate optimized search query
+        query = await self.generate_search_query(messages)
+        logger.info(f"🚀 Starting research on: {query}")
         
         try:
-            search_results = await self.search(topic)
+            # 2. Search
+            search_results = await self.search(query)
             
             if not search_results:
-                logger.warning("⚠️ No search results found. Generating report with limited context.")
                 return {
-                    "topic": topic,
+                    "topic": query,
                     "search_results": [],
-                    "report": f"# Research Report: {topic}\n\nNo search results were found for this topic. Please try a different query or check your internet connection.",
+                    "report": "I couldn't find any sources relevant to your query. Please try asking differently.",
                     "followup_questions": []
                 }
             
+            # 3. Scrape
             urls = [r['href'] for r in search_results]
             scraped_data = await self.scrape(urls)
             
-            if not scraped_data:
-                logger.warning("⚠️ No content scraped. Generating report from search summaries only.")
+            # 4. Analyze
+            report = await self.analyze(query, search_results, scraped_data, messages)
             
-            report = await self.analyze(topic, search_results, scraped_data)
+            # 5. Follow-up suggestions
+            followup_questions = await self.generate_followup_questions(report, query)
             
-            # Generate follow-up questions for multi-turn research
-            followup_questions = await self.generate_followup_questions(report, topic)
-            
-            logger.info(f"✅ Research complete for: {topic}")
+            logger.info(f"✅ Research complete for: {query}")
             return {
-                "topic": topic,
+                "topic": query,
                 "search_results": search_results,
                 "report": report,
                 "followup_questions": followup_questions
             }
-        except AnalysisError:
+        except AnalysisError as e:
             raise
         except Exception as e:
             logger.error(f"❌ Research pipeline failed: {e}")
